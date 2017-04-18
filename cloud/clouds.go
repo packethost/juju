@@ -67,6 +67,9 @@ const (
 	// RegionsKey is the name of the key in a cloud schema that holds the list
 	// of regions a cloud supports.
 	RegionsKey = "regions"
+
+	// A sigle API Token
+	ApiTokenAuthType = "api-token"
 )
 
 // Attrs serves as a map to hold regions specific configuration attributes.
@@ -317,6 +320,7 @@ var defaultCloudDescription = map[string]string{
 	"lxd":         "LXD Container Hypervisor",
 	"maas":        "Metal As A Service",
 	"openstack":   "Openstack Cloud",
+	"packet":      "Packet Host",
 }
 
 // WritePublicCloudMetadata marshals to YAML and writes the cloud metadata
