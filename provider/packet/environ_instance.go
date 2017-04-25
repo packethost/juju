@@ -2,19 +2,11 @@ package packet
 
 import (
 	"github.com/juju/errors"
-	"github.com/juju/juju/cloudconfig/instancecfg"
-	"github.com/juju/juju/cloudconfig/providerinit"
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
+	"github.com/juju/juju/environs/imagemetadata"
 	"github.com/juju/juju/instance"
-	"github.com/juju/juju/tools"
-	"github.com/juju/loggo"
-	"github.com/packethost/packngo"
 )
-
-type packetDevice struct {
-	server packngo.Device
-}
 
 // AllInstances returns all instances currently known to the broker.
 func (env *environ) AllInstances() ([]instance.Instance, error) {
@@ -24,23 +16,10 @@ func (env *environ) AllInstances() ([]instance.Instance, error) {
 
 	logger.Tracef("environ.AllInstances...")
 
-	servers, err := env.client.instances()
+	instances, err := env.client.envInstances()
 	if err != nil {
 		logger.Tracef("environ.AllInstances failed: %v", err)
 		return nil, err
-	}
-
-	instances := make([]instance.Instance, 0, len(servers))
-	for _, server := range servers {
-		instance := packetDevice{server: server}
-		instances = append(instances, instance)
-	}
-
-	if logger.LogLevel() <= loggo.TRACE {
-		logger.Tracef("All instances, len = %d:", len(instances))
-		for _, instance := range instances {
-			logger.Tracef("... id: %q, status: %q", instance.Id(), instance.Status())
-		}
 	}
 
 	return instances, nil
@@ -55,30 +34,20 @@ func (env *environ) Instances(ids []instance.Id) ([]instance.Instance, error) {
 	// real instance that's not part of the environment -- the Environ should
 	// treat that no differently to a request for one that does not exist.
 
-	m, err := env.client.instanceMap()
+	instances, err := env.client.envInstances(ids...)
 	if err != nil {
-		return nil, errors.Annotate(err, "environ.Instances failed")
+		logger.Tracef("environ.AllInstances failed: %v", err)
+		return nil, err
 	}
 
-	var found int
-	r := make([]instance.Instance, len(ids))
-	for i, id := range ids {
-		if s, ok := m[string(id)]; ok {
-			r[i] = packetDevice{server: s}
-			found++
-		}
+	if len(instances) == 0 {
+		err := environs.ErrNoInstances
+		return nil, err
 	}
-
-	if found == 0 {
-		err = environs.ErrNoInstances
-	} else if found != len(ids) {
-		err = environs.ErrPartialInstances
-	}
-
-	return r, errors.Trace(err)
+	return instances, nil
 }
 
-func (*environ) MaintainInstance(args environs.StartInstanceParams) error {
+func (env *environ) MaintainInstance(args environs.StartInstanceParams) error {
 	return nil
 }
 
@@ -91,60 +60,20 @@ func (env *environ) PrepareForBootstrap(ctx environs.BootstrapContext) error {
 	return nil
 }
 
+var findInstanceImage = func(matchingImages []*imagemetadata.ImageMetadata) (*imagemetadata.ImageMetadata, error) {
+	if len(matchingImages) == 0 {
+		return nil, errors.New("no matching image meta data")
+	}
+	return matchingImages[0], nil
+}
+
 func (env *environ) StartInstance(args environs.StartInstanceParams) (*environs.StartInstanceResult, error) {
-	logger.Infof("Packet environ.StartInstance...")
-
-	if args.InstanceConfig == nil {
-		return nil, errors.New("instance configuration is nil")
-	}
-
-	if len(args.Tools) == 0 {
-		return nil, errors.New("tools not found")
-	}
-
-	img, err := findInstanceImage(args.ImageMetadata)
-	if err != nil {
-		return nil, err
-	}
-
-	tools, err := args.Tools.Match(tools.Filter{Arch: img.Arch})
-	if err != nil {
-		return nil, errors.Errorf("chosen architecture %v not present in %v", img.Arch, args.Tools.Arches())
-	}
-
-	if err := args.InstanceConfig.SetTools(tools); err != nil {
+	logger.Infof("starting Packet instance")
+	res, err := env.client.newInstance(args)
+	if err != nill {
 		return nil, errors.Trace(err)
 	}
-	if err := instancecfg.FinishInstanceConfig(args.InstanceConfig, env.Config()); err != nil {
-		return nil, err
-	}
-	userData, err := providerinit.ComposeUserData(args.InstanceConfig, nil, PacketRenderer{})
-	if err != nil {
-		return nil, errors.Annotate(err, "cannot make user data")
-	}
-
-	logger.Debugf("packet user data; %d bytes", len(userData))
-
-	client := env.client
-	cfg := env.Config()
-	server, rootdrive, arch, err := client.newInstance(args, img, userData, cfg.AuthorizedKeys())
-	if err != nil {
-		return nil, errors.Errorf("failed start instance: %v", err)
-	}
-
-	inst := &packetDevice{server: server}
-
-	// prepare hardware characteristics
-	hwch, err := inst.hardware(arch, rootdrive.Size())
-	if err != nil {
-		return nil, err
-	}
-
-	logger.Debugf("hardware: %v", hwch)
-	return &environs.StartInstanceResult{
-		Instance: inst,
-		Hardware: hwch,
-	}, nil
+	return res, nil
 }
 
 func (env *environ) StopInstances(instances ...instance.Id) error {

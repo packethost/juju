@@ -10,18 +10,23 @@ import (
 type environProviderCredentials struct{}
 
 const (
-	credApiToken = "packet-api-token"
+	credAPIToken  = "packet-api-token"
+	credProjectID = "packet-project-id"
 )
 
 // CredentialSchemas is part of the environs.ProviderCredentials interface.
 func (environProviderCredentials) CredentialSchemas() map[cloud.AuthType]cloud.CredentialSchema {
 	return map[cloud.AuthType]cloud.CredentialSchema{
-		cloud.ApiTokenAuthType: {{
-			credApiToken, cloud.CredentialAttr{
-				Description: "Packet API Token",
-				Hidden:      true,
+		cloud.ApiTokenAuthType: {
+			{
+				credAPIToken, cloud.CredentialAttr{
+					Description: "Packet API Token",
+					Hidden:      true,
+				},
+			}, {
+				credProjectID, cloud.CredentialAttr{Description: "UUID of your project in Packet"},
 			},
-		}},
+		},
 	}
 }
 
